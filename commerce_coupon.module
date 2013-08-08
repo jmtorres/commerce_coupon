@@ -67,8 +67,7 @@ function commerce_coupon_entity_info() {
 function commerce_coupon_get_properties($coupon, array $options, $name) {
   switch ($name) {
     case 'price_component_name':
-      $coupon_machine_name = commerce_coupon_machine_name_code($coupon);
-      return $coupon->type . '_' . $coupon_machine_name;
+      return 'commerce_coupon_' . $coupon->type;
       break;
     case 'times_used':
       return commerce_coupon_get_number_of_uses($coupon->coupon_id);
@@ -852,17 +851,13 @@ function commerce_coupon_code_is_active($code) {
 function commerce_coupon_commerce_price_component_type_info() {
   $components = array();
 
-  $coupons = commerce_coupon_load_multiple(array(), array('is_active' => TRUE));
+  $coupon_types = commerce_coupon_get_types();
 
-  // Add a price component type per each coupon.
-  foreach ($coupons as $coupon) {
-    $name = commerce_coupon_type_get_name($coupon->type);
-    $coupon_machine_name = commerce_coupon_machine_name_code($coupon);
-    $components[$coupon->type . '_' . $coupon_machine_name] = array(
-      'title' => $name,
-      'display_title' => $name,
-      'coupon_type' => $coupon->type,
-      'coupon_code' => $coupon_machine_name,
+  // Add a price component type per each coupon type.
+  foreach ($coupon_types as $coupon_type) {
+    $components['commerce_coupon_' . $coupon_type->type] = array(
+      'title' => $coupon_type->label,
+      'display_title' => $coupon_type->label,
     );
   }
 
@@ -1118,4 +1113,37 @@ function commerce_coupon_action_get_coupons_for_order($commerce_order) {
     return array();
   }
   return array('order_coupons' => commerce_coupon_get_coupons_in_order($commerce_order->order_id));
+}
+
+/**
+ * Implementation of hook_commerce_price_formatted_components_alter()
+ * 
+ * Alter the price component label of coupons.
+ */
+function commerce_coupon_commerce_price_formatted_components_alter(&$components, $price, $entity) {
+  $coupons = array();
+  // Get all coupons attached to the order.
+  if (count($entity->commerce_coupon_order_reference)) {
+    foreach ($entity->commerce_coupon_order_reference['und'] as $coupon_id) {
+      $coupon = entity_metadata_wrapper('commerce_coupon', commerce_coupon_load($coupon_id['target_id']));
+      $coupons[$coupon->type->raw()][] = $coupon->commerce_coupon_code->value();
+    }
+  }
+
+  if ($coupons && $components) {
+    foreach ($components as $component_type => &$component_item) {
+      if (stripos($component_type, 'commerce_coupon_') !== FALSE) {
+        $coupon_type = preg_replace('/commerce_coupon_/', '', $component_type, 1);
+        // Append coupon codes to the label
+        if (isset($coupons[$coupon_type])) {
+          $component_item['title'] .= '<ul><li>'.  implode('</li><li>', $coupons[$coupon_type]) . '</li></ul>';
+        }
+        else {
+          // Display 
+          $old_coupon_component = explode('_', $component_type);
+          $component_item['title'] .= 'Coupon: ' . end($old_coupon_component);
+        }
+      }
+    }
+  }
 }
